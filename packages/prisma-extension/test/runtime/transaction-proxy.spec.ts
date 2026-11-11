@@ -159,6 +159,7 @@ const auditedClientOf = (deps: AuditPipelineDependencies) => ({
                     if (args.fails) throw new Error(`Unique constraint failed: ${args.id}`);
                     return args;
                   },
+                  reachedDatabase: () => false,
                   widened: new Map(),
                 },
                 auditContext: baseContext,

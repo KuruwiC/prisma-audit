@@ -128,6 +128,7 @@ interface AuditedCall {
   readonly operation: AuditAction;
   readonly args: ExtensionParams['args'];
   readonly query: ExtensionParams['query'];
+  readonly reachedDatabase: () => boolean;
 }
 
 /**
@@ -158,7 +159,7 @@ export const createAuditLogExtension = (options: PrismaAuditExtensionOptions) =>
 
   /** `transaction` keeps the audit of the level the operation started on; the binding's follows the innermost level */
   const runAudited = async (
-    { model, operation, args, query }: AuditedCall,
+    { model, operation, args, query, reachedDatabase }: AuditedCall,
     auditedModels: readonly string[],
     auditContext: AuditContext,
     outcome: OperationOutcome,
@@ -186,6 +187,7 @@ export const createAuditLogExtension = (options: PrismaAuditExtensionOptions) =>
             action: operation,
             args: injection.args as Record<string, unknown>,
             query,
+            reachedDatabase,
             widened: injection.widened,
           },
           auditContext,
@@ -203,7 +205,7 @@ export const createAuditLogExtension = (options: PrismaAuditExtensionOptions) =>
     return projectToRequestedShape(result, injection.injected);
   };
 
-  const auditOperation = async (params: ExtensionParams) => {
+  const auditOperation = async (params: ExtensionParams, reachedDatabase: () => boolean) => {
     const { operation, model, args, query } = params;
     if (!model || !isAuditableAction(operation)) {
       return query(args);
@@ -240,7 +242,13 @@ export const createAuditLogExtension = (options: PrismaAuditExtensionOptions) =>
       case 'audit': {
         const run = (operationTransaction: OperationTransaction | undefined) =>
           settledIn(operationTransaction?.audit, outcome, () =>
-            runAudited({ model, operation, args, query }, auditedModels, gate.context, outcome, operationTransaction),
+            runAudited(
+              { model, operation, args, query, reachedDatabase },
+              auditedModels,
+              gate.context,
+              outcome,
+              operationTransaction,
+            ),
           );
         return transaction
           ? transaction.runOperation((transactionAudit) =>
@@ -256,15 +264,15 @@ export const createAuditLogExtension = (options: PrismaAuditExtensionOptions) =>
   };
 
   /** A model write with its arguments as Prisma sends them and a `query` checked by the checkpoints of the client it was issued on */
-  const asContinued = (params: ExtensionParams): ExtensionParams => {
+  const asContinued = (params: ExtensionParams): { params: ExtensionParams; reachedDatabase: () => boolean } => {
     const { model, operation, query } = params;
     if (!model || !isAuditableAction(operation)) {
-      return params;
+      return { params, reachedDatabase: () => false };
     }
+    const checked = checkpoints.checkedQuery({ model, operation, query }, operationBinding()?.checkpoint);
     return {
-      ...params,
-      args: argumentsAsSent(params.args),
-      query: checkpoints.checkedQuery({ model, operation, query }, operationBinding()?.checkpoint),
+      params: { ...params, args: argumentsAsSent(params.args), query: checked.query },
+      reachedDatabase: checked.reachedDatabase,
     };
   };
 
@@ -276,7 +284,8 @@ export const createAuditLogExtension = (options: PrismaAuditExtensionOptions) =>
   const interceptOperation = async (params: ExtensionParams) => {
     const transaction = operationBinding()?.transaction;
     try {
-      return await auditOperation(asContinued(params));
+      const continued = asContinued(params);
+      return await auditOperation(continued.params, continued.reachedDatabase);
     } catch (error) {
       transaction?.noteStatementFailed();
       throw error;

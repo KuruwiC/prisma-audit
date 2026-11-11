@@ -34,7 +34,11 @@ export interface ExtensionCheckpoint {
 
 type ContinuationProgress = 'unreached' | 'running' | 'failed' | 'written';
 
-export interface WriteContinuation {
+interface WriteProgress {
+  progress: ContinuationProgress;
+}
+
+export interface WriteContinuation extends WriteProgress {
   readonly structure: WriteStructure;
   readonly innermost: ExtensionCheckpoint;
   /**
@@ -42,7 +46,6 @@ export interface WriteContinuation {
    * through a checkpoint, the one before it: the extension right after that holds the write
    */
   lastReached: ExtensionCheckpoint | undefined;
-  progress: ContinuationProgress;
   settled: boolean;
 }
 
@@ -59,6 +62,12 @@ export interface ContinuedWrite {
   readonly query: Query;
 }
 
+export interface CheckedWrite {
+  readonly query: Query;
+  /** True once a call of `query` sent the write to the database, and from then on; a failed attempt alone does not count */
+  readonly reachedDatabase: () => boolean;
+}
+
 export interface ExtensionCheckpoints {
   /**
    * The checkpoint after the extension named `extensionName`, applied to a client whose innermost
@@ -70,10 +79,10 @@ export interface ExtensionCheckpoints {
   ) => { readonly checkpoint: ExtensionCheckpoint; readonly extension: CheckpointExtension };
   /**
    * The `query` the audit continues `write` with, checked by the checkpoints of the client the
-   * write was issued on, whose innermost checkpoint is `innermost`; `write.query` itself when the
-   * client has none
+   * write was issued on, whose innermost checkpoint is `innermost`, and whether the write reached
+   * the database; a client with none continues `write.query` unchecked and tracks the same fact
    */
-  readonly checkedQuery: (write: ContinuedWrite, innermost: ExtensionCheckpoint | undefined) => Query;
+  readonly checkedQuery: (write: ContinuedWrite, innermost: ExtensionCheckpoint | undefined) => CheckedWrite;
 }
 
 const CHECKPOINT_EXTENSION_NAME = 'prisma-audit-checkpoint';
@@ -108,14 +117,14 @@ const rejection = (
   violation: AuditContinuationViolation,
 ) => new AuditExtensionContinuationError({ extensionName, modelName: model, operation, violation });
 
-const runWrite = async (continuation: WriteContinuation, run: () => Promise<unknown>): Promise<unknown> => {
-  continuation.progress = 'running';
+const runWrite = async (attempt: WriteProgress, run: () => Promise<unknown>): Promise<unknown> => {
+  attempt.progress = 'running';
   try {
     const result = await run();
-    continuation.progress = 'written';
+    attempt.progress = 'written';
     return result;
   } catch (error) {
-    continuation.progress = 'failed';
+    attempt.progress = 'failed';
     throw error;
   }
 };
@@ -164,10 +173,19 @@ export const createExtensionCheckpoints = (schemaMetadata: SchemaMetadata): Exte
   };
 
   const checkedQuery: ExtensionCheckpoints['checkedQuery'] = (write, innermost) => {
+    const attempts: WriteProgress[] = [];
+    const reachedDatabase = () => attempts.some(({ progress }) => progress === 'running' || progress === 'written');
     if (innermost === undefined) {
-      return write.query;
+      return {
+        query: (args) => {
+          const attempt: WriteProgress = { progress: 'unreached' };
+          attempts.push(attempt);
+          return runWrite(attempt, () => write.query(args));
+        },
+        reachedDatabase,
+      };
     }
-    return async (args) => {
+    const query: Query = async (args) => {
       const sent = argumentsAsSent(args);
       const continuation: WriteContinuation = {
         structure: writeStructureOf(schemaMetadata, write.model, write.operation, sent),
@@ -176,6 +194,7 @@ export const createExtensionCheckpoints = (schemaMetadata: SchemaMetadata): Exte
         progress: 'unreached',
         settled: false,
       };
+      attempts.push(continuation);
       let result: unknown;
       try {
         // Awaited in the scope, so that Prisma's operation, which starts once awaited, starts in it
@@ -188,6 +207,7 @@ export const createExtensionCheckpoints = (schemaMetadata: SchemaMetadata): Exte
       }
       return result;
     };
+    return { query, reachedDatabase };
   };
 
   return { checkpointAfter, checkedQuery };

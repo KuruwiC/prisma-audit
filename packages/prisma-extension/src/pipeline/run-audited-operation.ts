@@ -37,6 +37,8 @@ export interface InterceptedOperation {
    * the client the caller invoked it on, through the extensions applied after this one.
    */
   readonly query: (args: Record<string, unknown>) => Promise<unknown>;
+  /** Whether the caller's write has reached the database, through `query` or an earlier call of it */
+  readonly reachedDatabase: () => boolean;
   readonly widened: WidenedColumns;
 }
 
@@ -71,25 +73,20 @@ export interface AuditPipelineDependencies {
  * runs with the re-entrancy guard lowered, so a write an extension applied after this one issues of
  * its own while continuing the operation is audited; the audit's own queries and the callbacks it
  * runs run with it raised. The query is awaited inside that scope so Prisma's lazy operation starts
- * there. `onWritten` runs each time the caller's mutation has succeeded.
+ * there.
  */
 const operationContinuation =
-  (operation: InterceptedOperation, onWritten: () => void): AuditedOperation['execute'] =>
-  async (args) => {
-    const result = await runCallerMutation(() =>
-      withScope({ withinAudit: false }, async () => await operation.query(args)),
-    );
-    onWritten();
-    return result;
-  };
+  (operation: InterceptedOperation): AuditedOperation['execute'] =>
+  (args) =>
+    runCallerMutation(() => withScope({ withinAudit: false }, async () => await operation.query(args)));
 
 /**
  * The reads before the write and the write. The caller's own mutation error (see
  * `callerMutationFailureOf`) propagates untouched, without reaching the observer. Any other failure
- * is reported as `diff-generation` and rethrown as the original error. When the caller's mutation
- * had already written, which only a limited write the audit splits into rounds does, either failure
- * is also recorded on the transaction: the earlier rounds' rows must not commit without their
- * audit rows.
+ * is reported as `diff-generation` and rethrown as the original error. When the caller's write had
+ * already reached the database (an earlier round of a limited write, or a write an extension applied
+ * after the audit sent and then failed the operation or settled without waiting for), either
+ * failure is also recorded on the transaction: those rows must not commit without their audit rows.
  */
 const runExecutor = async (
   executor: OperationExecutor,
@@ -134,13 +131,10 @@ export const runAuditedOperation = async (
   const { operation: intercepted, auditContext, issuingClient, mode, plan, transaction, outcome } = input;
   const scope = executionScopeOf({ auditContext, issuingClient, transaction, failureSink: outcome });
   const { model, action, args, widened } = intercepted;
-  let written = false;
-  const execute = operationContinuation(intercepted, () => {
-    written = true;
-  });
+  const execute = operationContinuation(intercepted);
   const operation: AuditedOperation = { model, action, args, widened, execute };
   const executor = isBatchOperation(action) ? deps.batchExecutor : deps.singleExecutor;
-  const executed = await runExecutor(executor, operation, scope, deps, () => written);
+  const executed = await runExecutor(executor, operation, scope, deps, intercepted.reachedDatabase);
   await dispatch(
     { buildRecords: executed.buildRecords, plan, auditContext: scope.auditContext, outcome },
     deps.dispatchConfig,

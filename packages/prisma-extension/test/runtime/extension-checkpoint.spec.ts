@@ -55,10 +55,9 @@ const clientWith = (...extensions: readonly Extension[]) => {
   return { callbacks, innermost };
 };
 
-/** Continues a `User.update` through `client` as the audit hook does */
-const write = (
+/** The write the audit continues as a `User.update` through `client`, with the tracker of whether it reached the database */
+const checkedWrite = (
   client: ReturnType<typeof clientWith>,
-  args: unknown,
   run: (args: unknown) => Promise<unknown>,
   operation = 'update',
 ) => {
@@ -70,8 +69,16 @@ const write = (
         ? run(next)
         : callback({ model: 'User', operation, args: next, query: at(index + 1) });
     };
-  return checkpoints.checkedQuery({ model: 'User', operation, query: at(0) }, client.innermost)(args);
+  return checkpoints.checkedQuery({ model: 'User', operation, query: at(0) }, client.innermost);
 };
+
+/** Continues a `User.update` through `client` as the audit hook does */
+const write = (
+  client: ReturnType<typeof clientWith>,
+  args: unknown,
+  run: (args: unknown) => Promise<unknown>,
+  operation = 'update',
+) => checkedWrite(client, run, operation).query(args);
 
 const rejectionOf = async (pending: Promise<unknown>): Promise<AuditExtensionContinuationError> => {
   const error: unknown = await pending.then(
@@ -91,10 +98,15 @@ const withPost = { where: { id: 'u1' }, data: { email: 'a', posts: { create: { t
 
 describe('createExtensionCheckpoints', () => {
   describe('checkedQuery', () => {
-    it('returns the query the audit continues with as it is for a client with no checkpoint', () => {
-      const query = async () => ({ id: 'u1' });
+    it('continues the write with the query the audit continues with for a client with no checkpoint', async () => {
+      const { sent, run } = database();
 
-      expect(checkpoints.checkedQuery({ model: 'User', operation: 'update', query }, undefined)).toBe(query);
+      const result = await checkpoints
+        .checkedQuery({ model: 'User', operation: 'update', query: run }, undefined)
+        .query(args);
+
+      expect(result).toEqual({ id: 'u1' });
+      expect(sent).toEqual([args]);
     });
 
     it('runs a write whose values alone an extension changes, with the arguments the extension continued it with', async () => {
@@ -350,6 +362,184 @@ describe('createExtensionCheckpoints', () => {
 
       expect(error.extensionName).toBeUndefined();
       expect(error.message).toContain('a query extension applied after the audit');
+    });
+  });
+  describe('reachedDatabase', () => {
+    it('is false until the innermost checkpoint runs the write, true while it runs and after it is written', async () => {
+      let observe: (() => boolean) | undefined;
+      const seen: boolean[] = [];
+      const client = clientWith({
+        name: 'observer',
+        callback: async ({ args: received, query }) => {
+          seen.push(observe?.() ?? false);
+          return query(received);
+        },
+      });
+      const checked = checkedWrite(client, async () => {
+        seen.push(checked.reachedDatabase());
+        return { id: 'u1' };
+      });
+      observe = checked.reachedDatabase;
+
+      expect(checked.reachedDatabase()).toBe(false);
+      await checked.query(args);
+
+      expect(seen).toEqual([false, true]);
+      expect(checked.reachedDatabase()).toBe(true);
+    });
+
+    it('is false when an extension settles without continuing the write', async () => {
+      const client = clientWith({ name: 'fabricating', callback: async () => ({ id: 'u1' }) });
+      const checked = checkedWrite(client, database().run);
+
+      await rejectionOf(checked.query(args));
+
+      expect(checked.reachedDatabase()).toBe(false);
+    });
+
+    it('is false after a failed attempt alone', async () => {
+      const { run } = database(() => true);
+      const checked = checkedWrite(clientWith({ callback: passingOn }), run);
+
+      await expect(checked.query(args)).rejects.toThrow('unique constraint failed');
+
+      expect(checked.reachedDatabase()).toBe(false);
+    });
+
+    it('stays true after a successful attempt when a later call to query is rejected', async () => {
+      const { run } = database();
+      const client = clientWith({
+        name: 'twice',
+        callback: async ({ args: received, query }) => {
+          await query(received);
+          return query(received);
+        },
+      });
+      const checked = checkedWrite(client, run);
+
+      await rejectionOf(checked.query(args));
+
+      expect(checked.reachedDatabase()).toBe(true);
+    });
+
+    it('is true when an extension follows a failed attempt with a successful one', async () => {
+      let attempts = 0;
+      const { run } = database(() => ++attempts === 1);
+      const client = clientWith({
+        callback: async ({ args: received, query }) => {
+          await query(received).catch(() => undefined);
+          return query(received);
+        },
+      });
+      const checked = checkedWrite(client, run);
+
+      await checked.query(args);
+
+      expect(checked.reachedDatabase()).toBe(true);
+    });
+
+    it('is true when an extension throws after its call to query succeeded', async () => {
+      const client = clientWith({
+        callback: async ({ args: received, query }) => {
+          await query(received);
+          throw new Error('extension failed');
+        },
+      });
+      const checked = checkedWrite(client, database().run);
+
+      await expect(checked.query(args)).rejects.toThrow('extension failed');
+
+      expect(checked.reachedDatabase()).toBe(true);
+    });
+
+    it('is true while the write still runs when an extension settles without waiting for it', async () => {
+      let release: (() => void) | undefined;
+      const running = new Promise<void>((resolve) => {
+        release = resolve;
+      });
+      let started: Promise<unknown> | undefined;
+      const client = clientWith({
+        name: 'impatient',
+        callback: async ({ args: received, query }) => {
+          started = query(received);
+          return { id: 'u1' };
+        },
+      });
+      const checked = checkedWrite(client, async () => {
+        await running;
+        return { id: 'u1' };
+      });
+
+      const error = await rejectionOf(checked.query(args));
+
+      expect(error.violation).toEqual({ kind: 'not-continued' });
+      expect(checked.reachedDatabase()).toBe(true);
+      release?.();
+      await started;
+    });
+
+    it('is true once write.query runs for a client with no checkpoint, and false before', async () => {
+      let observed: boolean | undefined;
+      const checked = checkpoints.checkedQuery(
+        {
+          model: 'User',
+          operation: 'update',
+          query: async () => {
+            observed = checked.reachedDatabase();
+            return { id: 'u1' };
+          },
+        },
+        undefined,
+      );
+
+      expect(checked.reachedDatabase()).toBe(false);
+      await checked.query(args);
+
+      expect(observed).toBe(true);
+      expect(checked.reachedDatabase()).toBe(true);
+    });
+
+    it('is false for a client with no checkpoint whose write failed', async () => {
+      const checked = checkpoints.checkedQuery(
+        { model: 'User', operation: 'update', query: database(() => true).run },
+        undefined,
+      );
+
+      await expect(checked.query(args)).rejects.toThrow('unique constraint failed');
+
+      expect(checked.reachedDatabase()).toBe(false);
+    });
+
+    it.each([
+      { order: 'a written round and a failed one', fails: [false, true] },
+      { order: 'a failed round and a written one', fails: [true, false] },
+    ])(
+      'stays true across calls of the checked query, as the rounds of a limited write make them, after $order',
+      async ({ fails }) => {
+        let call = 0;
+        const { run } = database(() => fails[call++] === true);
+        const checked = checkedWrite(clientWith({ callback: ({ args: received, query }) => query(received) }), run);
+
+        await checked.query(args).catch(() => undefined);
+        await checked.query(args).catch(() => undefined);
+
+        expect(call).toBe(2);
+        expect(checked.reachedDatabase()).toBe(true);
+      },
+    );
+
+    it('turns true for a client with no checkpoint only once a later call of the checked query writes', async () => {
+      let call = 0;
+      const checked = checkpoints.checkedQuery(
+        { model: 'User', operation: 'update', query: database(() => call++ === 0).run },
+        undefined,
+      );
+
+      await expect(checked.query(args)).rejects.toThrow('unique constraint failed');
+      expect(checked.reachedDatabase()).toBe(false);
+      await checked.query(args);
+
+      expect(checked.reachedDatabase()).toBe(true);
     });
   });
 });

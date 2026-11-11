@@ -548,7 +548,7 @@ A query extension applied after the audit runs between the audit and the databas
 
 The values and the fields that pick rows are not compared: those of the top-level `where`, and those of the unique `where` and filters of nested writes. An extension after the audit that changes them (deterministic encryption of a unique field, a tenant filter adding a field to every `where`) must make the same change to the reads it handles, as the audit's own reads pass through it, or the before state may hold rows the write does not touch.
 
-A second call to `query` is rejected before it runs, but the first write has run by then; an extension that settles without waiting for its write is rejected, but the write may still land. Outside a transaction such a write stays unrecorded; inside a transaction the rejection rolls the transaction back.
+A second call to `query` is rejected before it runs, but the first write has run by then; an extension that settles without waiting for its write is rejected, but the write may still land; an extension that throws after its call to `query` succeeded fails the operation with a write that ran. Inside a transaction, an operation that fails once its write reached the database rolls the transaction back with `AuditRollbackError`, even when the callback catches the error. Outside a transaction such a write stays unrecorded.
 
 ```typescript
 // Changes values only: applied after the audit, the after state holds the values the application reads

@@ -90,10 +90,13 @@ const record: AuditLogData = {
 
 const args = { where: { id: 'u1' }, data: { name: 'Anne' } };
 
+/** `reachedDatabase` reports the write as reached once a call of the mock `query` has resolved, as the write the audit continues does */
 const interceptedOf = (
   action: InterceptedOperation['action'] = 'update',
   query: InterceptedOperation['query'] = vi.fn(),
-): InterceptedOperation => ({ model: 'User', action, args, query, widened: new Map() });
+  reachedDatabase: InterceptedOperation['reachedDatabase'] = () =>
+    vi.isMockFunction(query) && query.mock.settledResults.some(({ type }) => type === 'fulfilled'),
+): InterceptedOperation => ({ model: 'User', action, args, query, reachedDatabase, widened: new Map() });
 
 const executedWith = (records: AuditRecord[]): ExecutedOperation => ({
   result: { id: 'u1', name: 'Anne' },
@@ -762,6 +765,34 @@ describe('runAuditedOperation', () => {
 
         expect(query).toHaveBeenCalledTimes(2);
         expect(failuresOf(deps)).toEqual([]);
+        expect(recordedFailuresOf(transaction.audit)).toEqual([mutationError]);
+      });
+
+      it("records the caller's own mutation failure on the transaction when the write reached the database though query rejected, and rethrows it untouched", async () => {
+        const executor = stubExecutor(async (operation) => {
+          await operation.execute(operation.args);
+          return executedUpdate;
+        });
+        const query = vi.fn(async (): Promise<unknown> => {
+          throw mutationError;
+        });
+        const deps = createDeps({ singleExecutor: executor });
+        const transaction = activeTransactionOf(transactionClient);
+
+        await expect(
+          runOperation(
+            {
+              operation: interceptedOf('update', query, () => true),
+              auditContext,
+              issuingClient: createAuditedClient(),
+              mode: 'atomic',
+              plan: 'immediate',
+              transaction,
+            },
+            deps,
+          ),
+        ).rejects.toBe(mutationError);
+
         expect(recordedFailuresOf(transaction.audit)).toEqual([mutationError]);
       });
 

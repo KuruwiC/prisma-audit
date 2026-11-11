@@ -10,6 +10,7 @@ import type { AuditContext } from '@kuruwic/db-audit-core';
 import { createAsyncLocalStorageProvider } from '@kuruwic/db-audit-core';
 import {
   AuditExtensionContinuationError,
+  AuditRollbackError,
   createAuditClient,
   defineEntity,
   flushAllPendingWrites,
@@ -426,6 +427,240 @@ describe('query extensions applied after the audit', () => {
       expect((await auditLogsOfUser(user.id)).map((log) => log.action)).toEqual(['create']);
     });
 
+    it.each([{ mode: 'awaited' }, { mode: 'deferred' }, { mode: 'atomic' }] as const)(
+      'rolls back an interactive transaction whose callback catches the rejection of a second call to query, the first write included (write mode: $mode)',
+      async ({ mode }) => {
+        const client = createClient(mode);
+        const user = await client.withContext(() =>
+          client.audited.user.create({ data: { email: 'kept@example.com', name: 'Kept' } }),
+        );
+        const extended = client.audited.$extends({
+          name: 'continues-twice',
+          query: {
+            user: {
+              async update({ args, query }) {
+                await query(args);
+                return query(args);
+              },
+            },
+          },
+        });
+        const rejections: unknown[] = [];
+
+        const outcome = await client
+          .withContext(() =>
+            extended.$transaction(async (tx) => {
+              await tx.user.update({ where: { id: user.id }, data: { name: 'Changed' } }).catch((error: unknown) => {
+                rejections.push(error);
+              });
+            }),
+          )
+          .then(
+            () => undefined,
+            (reason: unknown) => reason,
+          );
+
+        expect(rejections).toEqual([expect.any(AuditExtensionContinuationError)]);
+        expect(outcome).toBeInstanceOf(AuditRollbackError);
+        await expectUnchanged(user.id);
+      },
+    );
+
+    const settle = (pending: Promise<unknown>) =>
+      pending.then(
+        () => undefined,
+        (reason: unknown) => reason,
+      );
+
+    it('does not commit a write the extension starts and returns from without waiting, when the callback of the interactive $transaction catches the rejection', async () => {
+      const { audited, withContext, user } = await seeded();
+      const dangling: Promise<void>[] = [];
+      const client = audited.$extends({
+        name: 'returns-before-writing',
+        query: {
+          user: {
+            async update({ args, query }) {
+              dangling.push(
+                query(args).then(
+                  () => undefined,
+                  () => undefined,
+                ),
+              );
+              return fabricated(user.id);
+            },
+          },
+        },
+      });
+      const rejections: unknown[] = [];
+
+      const outcome = await settle(
+        withContext(() =>
+          client.$transaction(async (tx) => {
+            await tx.user.update({ where: { id: user.id }, data: { name: 'Changed' } }).catch((error: unknown) => {
+              rejections.push(error);
+            });
+          }),
+        ),
+      );
+      await Promise.all(dangling);
+
+      expect(rejections).toEqual([expect.any(AuditExtensionContinuationError)]);
+      expect(outcome).toBeInstanceOf(AuditRollbackError);
+      await expectUnchanged(user.id);
+    });
+
+    it('rolls back an interactive transaction whose callback catches the error an extension throws after its call to query succeeded', async () => {
+      const { audited, withContext, user } = await seeded();
+      const client = audited.$extends({
+        name: 'throws-after-writing',
+        query: {
+          user: {
+            async update({ args, query }) {
+              await query(args);
+              throw new Error('extension failed after the write');
+            },
+          },
+        },
+      });
+      const rejections: unknown[] = [];
+
+      const outcome = await settle(
+        withContext(() =>
+          client.$transaction(async (tx) => {
+            await tx.user.update({ where: { id: user.id }, data: { name: 'Changed' } }).catch((error: unknown) => {
+              rejections.push(error);
+            });
+          }),
+        ),
+      );
+
+      expect(rejections).toEqual([expect.objectContaining({ message: 'extension failed after the write' })]);
+      expect(outcome).toBeInstanceOf(AuditRollbackError);
+      await expectUnchanged(user.id);
+    });
+
+    it('commits the other audited writes of an interactive transaction whose callback catches the rejection of a write the extension returned for without ever calling query', async () => {
+      const { audited, withContext, user } = await seeded();
+      const client = audited.$extends({
+        name: 'never-writes',
+        query: {
+          user: {
+            async update() {
+              return fabricated(user.id);
+            },
+          },
+        },
+      });
+      const rejections: unknown[] = [];
+
+      const other = await withContext(() =>
+        client.$transaction(async (tx) => {
+          await tx.user.update({ where: { id: user.id }, data: { name: 'Changed' } }).catch((error: unknown) => {
+            rejections.push(error);
+          });
+          return tx.user.create({ data: { email: 'other@example.com', name: 'Other' } });
+        }),
+      );
+      await flushAllPendingWrites();
+
+      expect(rejections).toEqual([expect.objectContaining({ violation: { kind: 'not-continued' } })]);
+      expect(await raw.user.findUniqueOrThrow({ where: { id: user.id } })).toMatchObject({ name: 'Kept' });
+      expect(await raw.user.findUniqueOrThrow({ where: { id: other.id } })).toMatchObject({ name: 'Other' });
+      expect((await auditLogsOfUser(user.id)).map((log) => log.action)).toEqual(['create']);
+      expect((await auditLogsOfUser(other.id)).map((log) => log.action)).toEqual(['create']);
+    });
+
+    it('lets an interactive transaction commit when the extension calls query only after the operation was rejected, and the write is not sent', async () => {
+      const { audited, withContext, user } = await seeded();
+      const late: Array<Promise<unknown>> = [];
+      const client = audited.$extends({
+        name: 'continues-late',
+        query: {
+          user: {
+            async update({ args, query }) {
+              late.push(
+                new Promise((resolve) => {
+                  setImmediate(() => resolve(query(args).catch((reason: unknown) => reason)));
+                }),
+              );
+              return fabricated(user.id);
+            },
+          },
+        },
+      });
+      const rejections: unknown[] = [];
+
+      const outcome = await settle(
+        withContext(() =>
+          client.$transaction(async (tx) => {
+            await tx.user.update({ where: { id: user.id }, data: { name: 'Changed' } }).catch((error: unknown) => {
+              rejections.push(error);
+            });
+          }),
+        ),
+      );
+      const lateErrors = await Promise.all(late);
+
+      expect(rejections).toEqual([expect.objectContaining({ violation: { kind: 'not-continued' } })]);
+      expect(lateErrors).toEqual([expect.objectContaining({ violation: { kind: 'continued-after-settling' } })]);
+      expect(outcome).toBeUndefined();
+      await expectUnchanged(user.id);
+    });
+
+    it.each([
+      {
+        scope: 'a second call to query',
+        kind: 'continued-twice',
+        extension: {
+          async update({
+            args,
+            query,
+          }: {
+            args: Prisma.UserUpdateArgs;
+            query: (args: Prisma.UserUpdateArgs) => Promise<unknown>;
+          }) {
+            await query(args);
+            return query(args);
+          },
+        },
+      },
+      {
+        scope: 'an extension that returns without waiting for its write',
+        kind: 'not-continued',
+        extension: {
+          async update({
+            args,
+            query,
+          }: {
+            args: Prisma.UserUpdateArgs;
+            query: (args: Prisma.UserUpdateArgs) => Promise<unknown>;
+          }) {
+            query(args).then(
+              () => undefined,
+              () => undefined,
+            );
+            return fabricated(args.where.id ?? '');
+          },
+        },
+      },
+    ])(
+      'rejects a write in atomic mode outside any transaction, and leaves the row unchanged, for $scope',
+      async ({ kind, extension }) => {
+        const client = createClient('atomic');
+        const user = await client.withContext(() =>
+          client.audited.user.create({ data: { email: 'kept@example.com', name: 'Kept' } }),
+        );
+        const extended = client.audited.$extends({ name: 'atomic-extension', query: { user: extension } });
+
+        const error = await rejectionOf(
+          client.withContext(() => extended.user.update({ where: { id: user.id }, data: { name: 'Changed' } })),
+        );
+
+        expect(error).toMatchObject({ extensionName: 'atomic-extension', violation: { kind } });
+        await expectUnchanged(user.id);
+      },
+    );
+
     it('rejects the second of two concurrent calls to query before it runs', async () => {
       const { audited, withContext, user } = await seeded();
       const client = audited.$extends({
@@ -663,6 +898,7 @@ describe('query extensions applied after the audit', () => {
         where: { entityType: 'Post' },
         select: { entityId: true, action: true },
       });
+      expect(postLogs).toHaveLength(2);
       expect(postLogs).toEqual(
         expect.arrayContaining([
           { entityId: renamed.id, action: 'update' },
