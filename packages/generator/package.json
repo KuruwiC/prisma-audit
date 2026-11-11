@@ -1,6 +1,6 @@
 {
   "name": "@kuruwic/prisma-audit-generator",
-  "version": "0.6.0",
+  "version": "0.6.1",
   "type": "module",
   "description": "Prisma generator that emits the schema data @kuruwic/prisma-audit reads at runtime",
   "bin": {
